@@ -7,6 +7,8 @@ package czlib
 
 import "io"
 
+// import "fmt"
+
 // err starts out as nil
 // we will call inflateEnd when we set err to a value:
 // - whatever error is returned by the underlying reader
@@ -14,9 +16,11 @@ import "io"
 type reader struct {
 	r      io.Reader
 	in     []byte
-	strm   zstream
+	strm   *Zstream
+	xstrm  bool
 	err    error
 	skipIn bool
+	isEOF  bool
 }
 
 // NewReader creates a new io.ReadCloser. Reads from the returned io.ReadCloser
@@ -27,13 +31,31 @@ func NewReader(r io.Reader) (io.ReadCloser, error) {
 	return NewReaderBuffer(r, DEFAULT_COMPRESSED_BUFFER_SIZE)
 }
 
-// NewReaderBuffer has the same behavior as NewReader but the user can provides
+// NewReaderBuffer has the same behavior as NewReader but the user can provide
 // a custom buffer size.
 func NewReaderBuffer(r io.Reader, bufferSize int) (io.ReadCloser, error) {
-	z := &reader{r: r, in: make([]byte, bufferSize)}
-	if err := z.strm.inflateInit(); err != nil {
+	strm, err := NewZstream()
+	if err != nil {
 		return nil, err
 	}
+	return newReader(r, strm, true, bufferSize)
+}
+
+// NewStreamReader has the same behavior as NewReader but the user can provide
+// a custom zstream context.
+func NewStreamReader(r io.Reader, strm *Zstream) (io.ReadCloser, error) {
+	return NewStreamReaderBuffer(r, strm, DEFAULT_COMPRESSED_BUFFER_SIZE)
+}
+
+// NewStreamReaderBuffer has the same behavior as NewStreamReader but the user
+// can provide a custom zstream context and buffer size.
+func NewStreamReaderBuffer(r io.Reader, strm *Zstream, bufferSize int) (io.ReadCloser, error) {
+	return newReader(r, strm, false, bufferSize)
+}
+
+func newReader(r io.Reader, strm *Zstream, xstrm bool, bufferSize int) (io.ReadCloser, error) {
+	strm.Reset()
+	z := &reader{r: r, in: make([]byte, bufferSize), strm: strm, xstrm: xstrm}
 	return z, nil
 }
 
@@ -53,12 +75,23 @@ func (z *reader) Read(p []byte) (int, error) {
 		// if we have no data to inflate, read more
 		if !z.skipIn && z.strm.availIn() == 0 {
 			var n int
+			if z.isEOF {
+				z.isEOF = false
+				z.strm.Reset()
+
+				z.err = io.EOF
+				return 0, z.err
+			}
 			n, z.err = z.r.Read(z.in)
+
+			// fmt.Printf("read %d bytes (%s)\n", n, z.err)
 			// If we got data and EOF, pretend we didn't get the
 			// EOF.  That way we will return the right values
 			// upstream.  Note this will trigger another read
 			// later on, that should return (0, EOF).
-			if n > 0 && z.err == io.EOF {
+			if z.err == io.EOF {
+				z.isEOF = true
+
 				z.err = nil
 			}
 
@@ -66,8 +99,10 @@ func (z *reader) Read(p []byte) (int, error) {
 			// the Reader interface. We should process all the
 			// data we got from the reader, and then return the
 			// error, whatever it is.
-			if (z.err != nil && z.err != io.EOF) || (n == 0 && z.err == io.EOF) {
-				z.strm.inflateEnd()
+			if z.err != nil && z.err != io.EOF {
+				if z.xstrm {
+					z.strm.inflateEnd()
+				}
 				return 0, z.err
 			}
 
@@ -77,10 +112,18 @@ func (z *reader) Read(p []byte) (int, error) {
 		}
 
 		// inflate some
-		ret, err := z.strm.inflate(zNoFlush)
+		flush := zNoFlush
+		if z.isEOF {
+			flush = zSyncFlush
+		}
+		// numOut := z.strm.totalOut()
+		ret, err := z.strm.inflate(flush)
+		// fmt.Printf("inflate(%d)=%d (%d->%d, %d avail)\n", z.isEOF, ret, numOut, z.strm.totalOut(), z.strm.availOut());
 		if err != nil {
+			if z.xstrm {
+				z.strm.inflateEnd()
+			}
 			z.err = err
-			z.strm.inflateEnd()
 			return 0, z.err
 		}
 
@@ -101,7 +144,9 @@ func (z *reader) Close() error {
 		}
 		return nil
 	}
-	z.strm.inflateEnd()
+	if z.xstrm {
+		z.strm.inflateEnd()
+	}
 	z.err = io.EOF
 	return nil
 }

@@ -48,7 +48,7 @@ const (
 type Writer struct {
 	w    io.Writer
 	out  []byte
-	strm zstream
+	strm Zstream
 	err  error
 }
 
