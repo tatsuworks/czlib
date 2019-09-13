@@ -23,6 +23,10 @@ type reader struct {
 	isEOF  bool
 }
 
+type Resetter interface {
+	Reset(io.Reader)
+}
+
 // NewReader creates a new io.ReadCloser. Reads from the returned io.ReadCloser
 //read and decompress data from r. The implementation buffers input and may read
 // more data than necessary from r.
@@ -54,9 +58,16 @@ func NewStreamReaderBuffer(r io.Reader, strm *Zstream, bufferSize int) (io.ReadC
 }
 
 func newReader(r io.Reader, strm *Zstream, xstrm bool, bufferSize int) (io.ReadCloser, error) {
-	strm.Reset()
-	z := &reader{r: r, in: make([]byte, bufferSize), strm: strm, xstrm: xstrm}
+	z := &reader{in: make([]byte, bufferSize), strm: strm, xstrm: xstrm}
+	z.Reset(r)
 	return z, nil
+}
+
+func (z *reader) Reset(r io.Reader) {
+	z.r = r;
+	z.err = nil
+	z.isEOF = false;
+	z.strm.Reset()
 }
 
 func (z *reader) Read(p []byte) (int, error) {
@@ -76,15 +87,12 @@ func (z *reader) Read(p []byte) (int, error) {
 		if !z.skipIn && z.strm.availIn() == 0 {
 			var n int
 			if z.isEOF {
-				z.isEOF = false
-				z.strm.Reset()
-
 				z.err = io.EOF
 				return 0, z.err
 			}
 			n, z.err = z.r.Read(z.in)
-
 			// fmt.Printf("read %d bytes (%s)\n", n, z.err)
+
 			// If we got data and EOF, pretend we didn't get the
 			// EOF.  That way we will return the right values
 			// upstream.  Note this will trigger another read

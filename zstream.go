@@ -121,7 +121,6 @@ func (strm *Zstream) inflateInit() error {
 	if result != Z_OK {
 		return fmt.Errorf("cgzip: failed to initialize inflate (%v): %v", result, strm.msg())
 	}
-	fmt.Println("inflate init ok")
 	return nil
 }
 
