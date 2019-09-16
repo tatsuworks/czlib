@@ -7,8 +7,6 @@ package czlib
 
 import "io"
 
-// import "fmt"
-
 // err starts out as nil
 // we will call inflateEnd when we set err to a value:
 // - whatever error is returned by the underlying reader
@@ -64,9 +62,9 @@ func newReader(r io.Reader, strm *Zstream, xstrm bool, bufferSize int) (io.ReadC
 }
 
 func (z *reader) Reset(r io.Reader) {
-	z.r = r;
+	z.r = r
 	z.err = nil
-	z.isEOF = false;
+	z.isEOF = false
 	z.strm.Reset()
 }
 
@@ -91,7 +89,6 @@ func (z *reader) Read(p []byte) (int, error) {
 				return 0, z.err
 			}
 			n, z.err = z.r.Read(z.in)
-			// fmt.Printf("read %d bytes (%s)\n", n, z.err)
 
 			// If we got data and EOF, pretend we didn't get the
 			// EOF.  That way we will return the right values
@@ -124,9 +121,8 @@ func (z *reader) Read(p []byte) (int, error) {
 		if z.isEOF {
 			flush = zSyncFlush
 		}
-		// numOut := z.strm.totalOut()
+
 		ret, err := z.strm.inflate(flush)
-		// fmt.Printf("inflate(%d)=%d (%d->%d, %d avail)\n", z.isEOF, ret, numOut, z.strm.totalOut(), z.strm.availOut());
 		if err != nil {
 			if z.xstrm {
 				z.strm.inflateEnd()
